@@ -1,6 +1,8 @@
 # PDFBoxPrintln
 A wrapper on Apache PDFBox to provide simple println() interface for text output in PDF document
 
+[![Build Status](https://travis-ci.org/momogentoo/PDFBoxPrintln.svg?branch=master)](https://travis-ci.org/momogentoo/PDFBoxPrintln)
+
 Purpose
 =============
 Provide a simple interface to create PDF document quickly
