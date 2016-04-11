@@ -33,7 +33,7 @@ public class PDFPrintLnExample {
 
            // Calculate text position
            // Get width of text on page
-           float textWidth = pdfBuilder.estimateStringWidth(TEXT_ON_BLANK_PAGE, 9);
+           float textWidth = pdfBuilder.getEstimatedStringWidth(TEXT_ON_BLANK_PAGE, 9);
 
            // Print in middle of page
            pdfBuilder.print((pdfBuilder.getEffectivePageWidth(pdfBuilder.getCurrentPage()) - textWidth) / 2, // X

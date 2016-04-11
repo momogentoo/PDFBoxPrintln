@@ -11,6 +11,9 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
 import java.awt.*;
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+
 
 /**
  * PDFBuilder
@@ -27,12 +30,12 @@ public class PDFBuilder implements Closeable {
     private static final Logger LOGGER = Logger.getLogger(PDFBuilder.class);
 
     private PDDocument document;
-    private PageOrientation pageOrientation = PageOrientation.LANDSCAPE;
-    private PDFont defaultFont = PDType1Font.HELVETICA_BOLD;
+    private PageOrientation pageOrientation = PageOrientation.PORTRAIT;
+    private PDFont defaultFont = PDType1Font.HELVETICA;
     private int textFontSize = DEFAULT_FONT_SIZE;
     private float pageMargin = DEFAULT_PAGE_MARGIN;
     private float lineSpace = DEFAULT_LINE_SPACE;
-    private PDFPageSize pageSize = PDFPageSize.LETTER;
+    private PDFPageSize pageSize = PDFPageSize.A4;
     private int pageNumber;
     private String pageNumberPattern = DEFAULT_PAGE_NUMBER_PATTERN;
     private boolean outputPageNumber = true;
@@ -234,12 +237,28 @@ public class PDFBuilder implements Closeable {
         return (int) ((maxHeight - marginTop - marginBottom) / (fontHeight + lineSpace)) + 1;
     }
 
-    public float estimateStringWidth(PDFont font, String text, int fontSize) throws IOException {
+    /**
+     * Get estimated text width according font, text and font size
+     *
+     * @param font PDFont
+     * @param text Text string
+     * @param fontSize Font size
+     * @return Estimated text width
+     * @throws IOException
+     */
+    public float getEstimatedStringWidth(PDFont font, String text, int fontSize) throws IOException {
         return font.getStringWidth(text) * fontSize / 1000;
     }
 
-    public float estimateStringWidth(String text, int fontSize) throws IOException {
-        return estimateStringWidth(defaultFont, text, fontSize);
+    /**
+     * Get estimated text width according text and font size by default font
+     * @param text Text string
+     * @param fontSize Font size
+     * @return Estimated text width
+     * @throws IOException
+     */
+    public float getEstimatedStringWidth(String text, int fontSize) throws IOException {
+        return getEstimatedStringWidth(defaultFont, text, fontSize);
     }
 
     /**
@@ -297,7 +316,14 @@ public class PDFBuilder implements Closeable {
     /**
      * Print multiple cells as a line
      *
-     * <p>Text Alignment is not supported yet</p>
+     * <p>
+     *     Notes:
+     *     <ul>
+     *         <li>Text Alignment is not supported yet</li>
+     *         <li>Text wrapping is supported</li>
+     *     </ul>
+     *
+     * </p>
      *
      * @param cells
      */
@@ -310,11 +336,14 @@ public class PDFBuilder implements Closeable {
         float y = getNextLineYCord();
         TextAttributes defaultAttr = new TextAttributes();
 
+        // Get total width of all cells, prorated
         for (Integer cellWidth : cellWidths) {
             totalCellWidth += cellWidth;
         }
 
         float widthTaken = 0;
+        int maxLinesUsed = 0;
+
         // Calculate prorated width for each cell
         for (int i = 0; (i < cells.length); ++i) {
             float widthOfCell = totalLineWidth * cellWidths[i] / totalCellWidth;
@@ -330,23 +359,40 @@ public class PDFBuilder implements Closeable {
                 attribute = defaultAttr;
             }
 
-            // Calculate a couple of attributes
-            attribute.setBgX(x);
-            attribute.setBgY(y);
-            attribute.setBgHeight(getFontHeight(defaultFont, attribute.getFontSize()));
-            attribute.setBgWidth(widthOfCell);
-            attribute.setFontSize(textFontSize);
-            print(x, y, cells[i].toString(), attribute);
+            float fontHeight = getFontHeight(defaultFont, attribute.getFontSize());
+
+            // Calculate text width to wrap text in fixed width cell
+            List<String> lines = getLinesByWords(cells[i].toString(), defaultFont, attribute.getFontSize(), widthOfCell);
+            int totalLines = lines.size();
+            float cellX = x;
+            float cellY = y;
+
+            for (int j = 0; j < totalLines; ++j) {
+//                System.out.println(lines.get(j) + " CellX: " + cellX + " CellY: " + cellY);
+
+                // Calculate a couple of attributes
+                attribute.setBgX(cellX);
+                attribute.setBgY(cellY);
+                attribute.setBgHeight(getFontHeight(defaultFont, attribute.getFontSize()));
+                attribute.setBgWidth(widthOfCell);
+                attribute.setFontSize(attribute.getFontSize());
+                print(cellX, cellY, lines.get(j), attribute);
+                cellY = cellY -  fontHeight;
+            }
+
+            if (totalLines > maxLinesUsed) {
+                maxLinesUsed = totalLines;
+            }
 
             widthTaken += widthOfCell;
         }
 
         cur_x = x;
-        cur_y = y;
-        used_height = y;
+        cur_y = y - fontHeight * (maxLinesUsed - 1);
+        used_height = y - fontHeight * (maxLinesUsed - 1);
 
-        curLines++;
-        availableLines--;
+        curLines += maxLinesUsed;
+        availableLines -= maxLinesUsed;
     }
 
     private float getNextLineYCord() {
@@ -393,7 +439,7 @@ public class PDFBuilder implements Closeable {
 
         // Calculate new text position for this text line
         float x;
-        float textWidth = estimateStringWidth(defaultFont, text, textFontSize);
+        float textWidth = getEstimatedStringWidth(defaultFont, text, textFontSize);
         switch (alignment) {
             default:
             case LEFT:
@@ -509,7 +555,7 @@ public class PDFBuilder implements Closeable {
     private void addPageNumber(PDPage page, int number, String pattern) throws IOException {
         float effWidth = getEffectivePageWidth(page);
         String pageNumberText = String.format(pattern, number);
-        float textWidth = estimateStringWidth(defaultFont, pageNumberText, pageNumberFontSize);
+        float textWidth = getEstimatedStringWidth(defaultFont, pageNumberText, pageNumberFontSize);
         float x = (effWidth - textWidth) / 2;
         float y = pageMargin / 2;
 
@@ -568,6 +614,48 @@ public class PDFBuilder implements Closeable {
         }
 
         return newPageCreated;
+    }
+
+    /**
+     * Break text into multiple lines at boundary of word according fixed width, font and font size
+     *
+     * <p>To wrap text in a fixed width, call this function to break long text into multiple lines</p>    *
+     *
+     * @param text
+     * @param font
+     * @param fontSize
+     * @param fixedWidth
+     * @return
+     * @throws IOException
+     */
+    public List<String> getLinesByWords(String text, PDFont font, int fontSize, float fixedWidth) throws IOException {
+        List<String> result = new ArrayList<String>();
+
+        int start = 0;
+        int end = 0;
+        for ( int i : getPossibleWrapPointsByWords(text) ) {
+            float width = font.getStringWidth(text.substring(start, i)) / 1000 * fontSize;
+            if ( start < end && width > fixedWidth ) {
+                result.add(text.substring(start, end));
+                start = end;
+            }
+            end = i;
+        }
+        // Last piece of text
+        result.add(text.substring(start));
+
+        return result;
+    }
+
+    protected int [] getPossibleWrapPointsByWords(String text) {
+        String[] split = text.split("(?<=\\W)");
+        int[] possibleWrapPoints = new int[split.length];
+        possibleWrapPoints[0] = split[0].length();
+        for ( int i = 1 ; i < split.length ; i++ ) {
+            possibleWrapPoints[i] = possibleWrapPoints[i - 1] + split[i].length();
+        }
+
+        return possibleWrapPoints;
     }
 
 }
